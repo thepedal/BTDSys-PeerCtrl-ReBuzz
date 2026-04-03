@@ -10,3 +10,4 @@ C:\Users\lukep\Desktop\PeerCtrl_ReBuzz\PeerCtrl\obj\Release\BTDSys PeerCtrl.NET.
 C:\Users\lukep\Desktop\PeerCtrl_ReBuzz\PeerCtrl\obj\Release\refint\BTDSys PeerCtrl.NET.dll
 C:\Users\lukep\Desktop\PeerCtrl_ReBuzz\PeerCtrl\obj\Release\BTDSys PeerCtrl.NET.pdb
 C:\Users\lukep\Desktop\PeerCtrl_ReBuzz\PeerCtrl\obj\Release\ref\BTDSys PeerCtrl.NET.dll
+C:\Users\lukep\Desktop\PeerCtrl_ReBuzz\PeerCtrl\obj\Release\PeerCtrl.sourcelink.json

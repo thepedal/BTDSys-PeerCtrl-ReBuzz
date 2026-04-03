@@ -124,6 +124,8 @@ namespace BTDSys.PeerCtrl
         CurveCanvas _curveEditor;
         TextBox    _midiIncDecAmtBox, _sendFreqBox;
         CheckBox   _stopOnMuteCheck;
+        Button     _learnBtn;
+        bool       _learning;
 
         public SettingsWindow(PeerCtrlMachine machine)
         {
@@ -135,6 +137,8 @@ namespace BTDSys.PeerCtrl
             Content    = Build();
             Snapshot();
             Populate();
+            _machine.MidiCCReceived += OnMidiLearn;
+            Closed += (s, e) => { _machine.MidiCCReceived -= OnMidiLearn; StopLearn(); };
         }
 
         // ── Layout ────────────────────────────────────────────────────────────
@@ -201,8 +205,10 @@ namespace BTDSys.PeerCtrl
             _midiIncDecCheck   = Chk("Inc/Dec (96/97)", (s,e)=>{if(!_suppress){var a=Current();if(a!=null)a.MidiIncDec=_midiIncDecCheck.IsChecked==true;}});
             _midiWrapCheck     = Chk("Wrap",            (s,e)=>{if(!_suppress){var a=Current();if(a!=null)a.MidiIncDecWrap=_midiWrapCheck.IsChecked==true;}});
 
+            _learnBtn = Btn("Learn", (s,e) => { if (_learning) StopLearn(); else StartLearn(); });
+
             var mRow1=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(0,2,0,2)};
-            mRow1.Children.Add(Lbl("Controller:")); mRow1.Children.Add(_midiCtrlCombo); mRow1.Children.Add(new StackPanel{Width=8}); mRow1.Children.Add(Lbl("Channel:")); mRow1.Children.Add(_midiChanCombo);
+            mRow1.Children.Add(Lbl("Controller:")); mRow1.Children.Add(_midiCtrlCombo); mRow1.Children.Add(new StackPanel{Width=8}); mRow1.Children.Add(Lbl("Channel:")); mRow1.Children.Add(_midiChanCombo); mRow1.Children.Add(new StackPanel{Width=8}); mRow1.Children.Add(_learnBtn);
             var mRow2=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(0,2,0,0)};
             mRow2.Children.Add(_midiFeedbackCheck); mRow2.Children.Add(new StackPanel{Width=12}); mRow2.Children.Add(_midiIncDecCheck); mRow2.Children.Add(new StackPanel{Width=12}); mRow2.Children.Add(_midiWrapCheck);
             var mPanel=new StackPanel(); mPanel.Children.Add(mRow1); mPanel.Children.Add(mRow2);
@@ -354,6 +360,46 @@ namespace BTDSys.PeerCtrl
             var a=Current(); if(a==null)return;
             a.ParamIndex=_paramCombo.SelectedIndex-1;
             _machine.ResolveAssignment(a); UpdateParamInfo(a); RefreshList();
+        }
+
+        // ── MIDI Learn ─────────────────────────────────────────────────────────
+
+        void StartLearn()
+        {
+            if (Current() == null) return;   // need an assignment selected
+            _learning = true;
+            _learnBtn.Content    = "Cancel";
+            _learnBtn.Background = Br("#AA3333");
+        }
+
+        void StopLearn()
+        {
+            _learning = false;
+            if (_learnBtn != null)
+            {
+                _learnBtn.Content    = "Learn";
+                _learnBtn.Background = Br("#3A3A3A");
+            }
+        }
+
+        // Called from machine's audio thread – marshal to UI thread
+        void OnMidiLearn(int ctrl, int channel)
+        {
+            if (!_learning) return;
+            Dispatcher.Invoke(() =>
+            {
+                var a = Current();
+                if (a == null) { StopLearn(); return; }
+
+                _suppress = true;
+                a.MidiController = ctrl;
+                a.MidiChannel    = channel + 1;   // store as 1-based
+                _midiCtrlCombo.SetSelectedIndex(ctrl + 1);
+                _midiChanCombo.SetSelectedIndex(channel + 1);
+                _suppress = false;
+
+                StopLearn();
+            });
         }
 
         // ── Helpers ────────────────────────────────────────────────────────────

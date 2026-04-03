@@ -1,0 +1,12 @@
+C:\Program Files\ReBuzz\Gear\Generators\BTDSys PeerCtrl.NET.deps.json
+C:\Program Files\ReBuzz\Gear\Generators\BTDSys PeerCtrl.NET.dll
+C:\Program Files\ReBuzz\Gear\Generators\BTDSys PeerCtrl.NET.pdb
+C:\Users\lukep\Desktop\PeerCtrl_ReBuzz\PeerCtrl\obj\Release\PeerCtrl.csproj.AssemblyReference.cache
+C:\Users\lukep\Desktop\PeerCtrl_ReBuzz\PeerCtrl\obj\Release\PeerCtrl.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\lukep\Desktop\PeerCtrl_ReBuzz\PeerCtrl\obj\Release\PeerCtrl.AssemblyInfoInputs.cache
+C:\Users\lukep\Desktop\PeerCtrl_ReBuzz\PeerCtrl\obj\Release\PeerCtrl.AssemblyInfo.cs
+C:\Users\lukep\Desktop\PeerCtrl_ReBuzz\PeerCtrl\obj\Release\PeerCtrl.csproj.CoreCompileInputs.cache
+C:\Users\lukep\Desktop\PeerCtrl_ReBuzz\PeerCtrl\obj\Release\BTDSys PeerCtrl.NET.dll
+C:\Users\lukep\Desktop\PeerCtrl_ReBuzz\PeerCtrl\obj\Release\refint\BTDSys PeerCtrl.NET.dll
+C:\Users\lukep\Desktop\PeerCtrl_ReBuzz\PeerCtrl\obj\Release\BTDSys PeerCtrl.NET.pdb
+C:\Users\lukep\Desktop\PeerCtrl_ReBuzz\PeerCtrl\obj\Release\ref\BTDSys PeerCtrl.NET.dll

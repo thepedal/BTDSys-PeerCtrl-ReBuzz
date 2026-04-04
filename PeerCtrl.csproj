@@ -47,6 +47,11 @@
       <HintPath>$(ReBuzzDir)\BuzzGUI.Common.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- MIDI output for feedback -->
+    <Reference Include="NAudio.Midi">
+      <HintPath>$(ReBuzzDir)\NAudio.Midi.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
   <!-- No XAML pages – SettingsWindow is built entirely in code to avoid BAML load issues in the plugin context -->

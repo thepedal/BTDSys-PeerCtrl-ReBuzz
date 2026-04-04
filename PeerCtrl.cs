@@ -13,6 +13,7 @@ using System.Windows;
 using System.Windows.Input;
 using Buzz.MachineInterface;   // IBuzzMachine, IBuzzMachineHost, MachineDecl, ParameterDecl, Sample, WorkModes
 using BuzzGUI.Interfaces;      // IMenuItem, IMachine, IParameter, IParameterGroup, IBuzz, etc.
+using NAudio.Midi;             // MidiOut for feedback
 
 namespace BTDSys.PeerCtrl
 {
@@ -112,7 +113,12 @@ namespace BTDSys.PeerCtrl
         /// Map value01 through the curve and set the target parameter.
         /// Mirrors CTrack::FloatToPVal + UpdateInertia send path from the original.
         /// </summary>
-        public void ApplyValue(float value01, BuzzGUI.Interfaces.IBuzz buzz)
+        // Track last sent feedback CC value (0-127, -1 = never sent) to avoid
+        // flooding the controller with identical values
+        [System.Xml.Serialization.XmlIgnore]
+        public int LastFeedbackSent { get; set; } = -1;
+
+        public void ApplyValue(float value01, BuzzGUI.Interfaces.IBuzz buzz, bool sendFeedback = true)
         {
             if (string.IsNullOrEmpty(_machineName) || _paramIndex < 0 || buzz == null) return;
 
@@ -143,6 +149,17 @@ namespace BTDSys.PeerCtrl
                     param.SetValue(tr, pval);
             else
                 param.SetValue(_targetTrack < 0 ? 0 : _targetTrack, pval);
+
+            // MIDI feedback – only when requested and value has actually changed
+            if (sendFeedback && _midiFeedback && _midiController >= 0 && _midiChannel != 0)
+            {
+                int ccVal = Math.Max(0, Math.Min(127, (int)(value01 * 127f + 0.5f)));
+                if (ccVal != LastFeedbackSent)
+                {
+                    LastFeedbackSent = ccVal;
+                    MidiOutputHelper.Send(_midiController, _midiChannel, ccVal);
+                }
+            }
         }
 
         public event PropertyChangedEventHandler PropertyChanged;
@@ -159,6 +176,7 @@ namespace BTDSys.PeerCtrl
         public float ValueTarget   = 0f;
         public float ValueStep     = 0f;
         public bool  Sliding       = false;
+        public bool  SlidingFromMidi = false;
         public float LastSent      = -1f;
         public bool  Slaved        = false;
 
@@ -172,16 +190,16 @@ namespace BTDSys.PeerCtrl
     [Serializable]
     public class PeerCtrlState
     {
-        /// <summary>One list per track (length == MAX_TRACKS).</summary>
         public List<List<TrackAssignment>> TrackAssignments { get; set; }
             = new List<List<TrackAssignment>>();
 
-        // The "Attributes" from the original are stored here instead, because
-        // the managed API has no equivalent of CMachineAttribute for properties
-        // that aren't pattern-editor parameters.
         public int MidiIncDecAmount { get; set; } = 1024;
         public int SendFreq         { get; set; } = 2;
         public int StopOnMute       { get; set; } = 0;
+
+        // Saved Value parameter for each track (0-65534), for feedback restoration
+        // -1 means not saved
+        public List<int> SavedTrackValues { get; set; } = new List<int>();
     }
 
     // =========================================================================
@@ -324,8 +342,12 @@ namespace BTDSys.PeerCtrl
                     StopOnMute       = StopOnMute,
                 };
                 for (int t = 0; t < MAX_TRACKS; t++)
+                {
                     st.TrackAssignments.Add(
                         new List<TrackAssignment>(_tracks[t].Assignments));
+                    // Save the current float value as a raw int (0-65534)
+                    st.SavedTrackValues.Add((int)(_tracks[t].ValueCurrent * 65534f + 0.5f));
+                }
                 return st;
             }
             set
@@ -339,10 +361,16 @@ namespace BTDSys.PeerCtrl
                     _tracks[t].Assignments.Clear();
                     if (t < value.TrackAssignments.Count)
                         _tracks[t].Assignments.AddRange(value.TrackAssignments[t]);
+
+                    // Restore saved value so feedback sends the correct position
+                    if (t < value.SavedTrackValues.Count && value.SavedTrackValues[t] >= 0)
+                    {
+                        float v = Clamp01(value.SavedTrackValues[t] / 65534.0f);
+                        _tracks[t].ValueCurrent = _tracks[t].ValueTarget = v;
+                    }
                 }
-                // Mark init done – other machines may not be in graph yet so
-                // resolution is retried in Tick(). SendNow no longer needs this guard.
-                _initialising = false;
+                _initialising       = false;
+                _feedbackSentOnLoad = false;
                 ResolveAllMachines();
             }
         }
@@ -419,7 +447,7 @@ namespace BTDSys.PeerCtrl
         // (mirrors CTrack::ValueChange + CTrack::UpdateInertia from original)
         // =====================================================================
 
-        void ValueChange(TrackState ts, int trackIdx, float v01)
+        void ValueChange(TrackState ts, int trackIdx, float v01, bool fromMidi = false)
         {
             ts.ValueTarget = Clamp01(v01);
 
@@ -429,38 +457,35 @@ namespace BTDSys.PeerCtrl
                 float steps = InertiaLength * spt;
                 if (steps > 0f)
                 {
-                    ts.ValueStep = (ts.ValueTarget - ts.ValueCurrent) / steps;
-                    ts.Sliding   = true;
+                    ts.ValueStep      = (ts.ValueTarget - ts.ValueCurrent) / steps;
+                    ts.Sliding        = true;
+                    ts.SlidingFromMidi = fromMidi;
                 }
                 else
                 {
                     ts.ValueCurrent = ts.ValueTarget;
                     ts.Sliding      = false;
-                    SendNow(ts);
+                    SendNow(ts, fromMidi);
                 }
             }
             else
             {
-                // No inertia – apply immediately.
-                // Work() may never be called on a no-audio control machine,
-                // so we can't rely on UpdateInertia() to push the value out.
                 ts.ValueCurrent = ts.ValueTarget;
                 ts.Sliding      = false;
-                SendNow(ts);
+                SendNow(ts, fromMidi);
             }
 
-            // Cascade: if the next track is Slaved, propagate the same value
             int next = trackIdx + 1;
             if (next < MAX_TRACKS && _tracks[next].Slaved)
-                ValueChange(_tracks[next], next, v01);
+                ValueChange(_tracks[next], next, v01, fromMidi);
         }
 
-        void SendNow(TrackState ts)
+        void SendNow(TrackState ts, bool fromMidi = false)
         {
             ts.ValueCurrent = Clamp01(ts.ValueCurrent);
             var buzz = Buzz;
             foreach (var a in ts.Assignments)
-                a.ApplyValue(ts.ValueCurrent, buzz);
+                a.ApplyValue(ts.ValueCurrent, buzz, sendFeedback: !fromMidi);
             ts.LastSent = ts.ValueCurrent;
         }
 
@@ -494,7 +519,7 @@ namespace BTDSys.PeerCtrl
             {
                 var buzz = Buzz;
                 foreach (var a in ts.Assignments)
-                    a.ApplyValue(ts.ValueCurrent, buzz);
+                    a.ApplyValue(ts.ValueCurrent, buzz, sendFeedback: !ts.SlidingFromMidi);
                 ts.LastSent = ts.ValueCurrent;
             }
         }
@@ -504,6 +529,8 @@ namespace BTDSys.PeerCtrl
         // =====================================================================
         // IBuzzMachine – Tick / Work
         // =====================================================================
+
+        bool _feedbackSentOnLoad = false;
 
         public void Tick()
         {
@@ -518,6 +545,30 @@ namespace BTDSys.PeerCtrl
                     ts.Assignments.Any(a => a.ResolvedParam == null && !string.IsNullOrEmpty(a.MachineName)));
                 if (anyUnresolved)
                     ResolveAllMachines();
+            }
+
+            // On the first tick after song load, send feedback from the SAVED
+            // ValueCurrent (restored from MachineState) BEFORE SyncFromParamValues
+            // can overwrite it with whatever the physical controller is sending.
+            if (!_feedbackSentOnLoad)
+            {
+                _feedbackSentOnLoad = true;
+                int numTracks = host?.Machine?.TrackCount ?? 0;
+                for (int t = 0; t < numTracks && t < MAX_TRACKS; t++)
+                {
+                    var ts = _tracks[t];
+                    // Send feedback for each assignment using the restored saved value
+                    foreach (var a in ts.Assignments)
+                    {
+                        if (a.MidiFeedback && a.MidiController >= 0 && a.MidiChannel != 0)
+                        {
+                            int ccVal = Math.Max(0, Math.Min(127,
+                                (int)(ts.ValueCurrent * 127f + 0.5f)));
+                            a.LastFeedbackSent = ccVal;
+                            MidiOutputHelper.Send(a.MidiController, a.MidiChannel, ccVal);
+                        }
+                    }
+                }
             }
 
             SyncFromParamValues();
@@ -550,7 +601,13 @@ namespace BTDSys.PeerCtrl
                     if (raw == valueParam.NoValue) continue;
                     float v = Clamp01(raw / 65534.0f);
                     var ts = _tracks[t];
-                    if (Math.Abs(v - ts.ValueCurrent) > 0.00001f || ts.LastSent < 0f)
+
+                    // Also force send if any assignment has never sent feedback
+                    bool feedbackPending = ts.Assignments.Any(a =>
+                        a.MidiFeedback && a.MidiController >= 0 &&
+                        a.MidiChannel != 0 && a.LastFeedbackSent == -1);
+
+                    if (Math.Abs(v - ts.ValueCurrent) > 0.00001f || ts.LastSent < 0f || feedbackPending)
                     {
                         ts.ValueCurrent = ts.ValueTarget = v;
                         SendNow(ts);
@@ -626,12 +683,12 @@ namespace BTDSys.PeerCtrl
                         else if (newT < 0.0f)
                             newT = a.MidiIncDecWrap ? newT + 1.0f : 0.0f;
 
-                        ValueChange(ts, t, newT);
+                        ValueChange(ts, t, newT, fromMidi: true);
                         handled = true;
                     }
                     else if (ctrl == a.MidiController)
                     {
-                        ValueChange(ts, t, value / 127.0f);
+                        ValueChange(ts, t, value / 127.0f, fromMidi: true);
                         handled = true;
                     }
                 }
@@ -818,5 +875,67 @@ namespace BTDSys.PeerCtrl
         public bool CanExecute(object parameter) => true;
         public void Execute(object parameter)    => _execute?.Invoke();
         public event EventHandler CanExecuteChanged { add { } remove { } }
+    }
+
+    // =========================================================================
+    // Static MIDI output helper for feedback
+    // =========================================================================
+
+    static class MidiOutputHelper
+    {
+        static readonly object _lock = new object();
+        static readonly Dictionary<int, MidiOut> _outs = new Dictionary<int, MidiOut>();
+
+        /// <summary>
+        /// Send a CC value (0-127) to all MIDI output devices.
+        /// channel is 1-based (1-16); 17 = all channels.
+        /// </summary>
+        public static void Send(int controller, int channel, int ccVal)
+        {
+            if (controller < 0 || controller > 127 || channel == 0) return;
+            ccVal = Math.Max(0, Math.Min(127, ccVal));
+
+            int numDevices = 0;
+            try { numDevices = MidiOut.NumberOfDevices; } catch { return; }
+
+            lock (_lock)
+            {
+                for (int dev = 0; dev < numDevices; dev++)
+                {
+                    try
+                    {
+                        if (!_outs.TryGetValue(dev, out var midiOut))
+                            _outs[dev] = midiOut = new MidiOut(dev);
+
+                        if (channel == 17)
+                            for (int ch = 1; ch <= 16; ch++)
+                                midiOut.Send(MakeCC(controller, ccVal, ch));
+                        else
+                            midiOut.Send(MakeCC(controller, ccVal, channel));
+                    }
+                    catch
+                    {
+                        // Device may have been disconnected – remove it
+                        if (_outs.TryGetValue(dev, out var dead))
+                        {
+                            try { dead.Dispose(); } catch { }
+                            _outs.Remove(dev);
+                        }
+                    }
+                }
+            }
+        }
+
+        static int MakeCC(int ctrl, int val, int ch) =>
+            (0xB0 | ((ch - 1) & 0x0F)) | (ctrl << 8) | (val << 16);
+
+        public static void DisposeAll()
+        {
+            lock (_lock)
+            {
+                foreach (var m in _outs.Values) try { m.Dispose(); } catch { }
+                _outs.Clear();
+            }
+        }
     }
 }

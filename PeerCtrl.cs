@@ -601,13 +601,7 @@ namespace BTDSys.PeerCtrl
                     if (raw == valueParam.NoValue) continue;
                     float v = Clamp01(raw / 65534.0f);
                     var ts = _tracks[t];
-
-                    // Also force send if any assignment has never sent feedback
-                    bool feedbackPending = ts.Assignments.Any(a =>
-                        a.MidiFeedback && a.MidiController >= 0 &&
-                        a.MidiChannel != 0 && a.LastFeedbackSent == -1);
-
-                    if (Math.Abs(v - ts.ValueCurrent) > 0.00001f || ts.LastSent < 0f || feedbackPending)
+                    if (Math.Abs(v - ts.ValueCurrent) > 0.00001f || ts.LastSent < 0f)
                     {
                         ts.ValueCurrent = ts.ValueTarget = v;
                         SendNow(ts);
@@ -619,13 +613,6 @@ namespace BTDSys.PeerCtrl
 
         public bool Work(Sample[] output, int n, WorkModes mode)
         {
-            // Lazy resolution: Buzz graph may not be ready at constructor time
-            if (_initialising)
-            {
-                ResolveAllMachines();
-                _initialising = false;
-            }
-
             _samplesAccum  += n;
             _updateCounter++;
 
@@ -778,7 +765,7 @@ namespace BTDSys.PeerCtrl
         void ShowAbout()
         {
             MessageBox.Show(
-                "BTDSys PeerCtrl 1.6\n" +
+                "BTDSys PeerCtrl v1.3\n" +
                 "© 2002–2008 Ed Powley (BTDSys)\n\n" +
                 "ReBuzz C# managed machine port.",
                 "BTDSys PeerCtrl",

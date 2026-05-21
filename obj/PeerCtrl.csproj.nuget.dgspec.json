@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\lukep\\Desktop\\PeerCtrl_ReBuzz\\PeerCtrl\\PeerCtrl.csproj": {}
+    "C:\\Users\\lukep\\Desktop\\projex_2026\\ReBuzz_pedal_machines\\PeerCtrl_ReBuzz\\PeerCtrl\\PeerCtrl.csproj": {}
   },
   "projects": {
-    "C:\\Users\\lukep\\Desktop\\PeerCtrl_ReBuzz\\PeerCtrl\\PeerCtrl.csproj": {
+    "C:\\Users\\lukep\\Desktop\\projex_2026\\ReBuzz_pedal_machines\\PeerCtrl_ReBuzz\\PeerCtrl\\PeerCtrl.csproj": {
       "version": "1.6.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\lukep\\Desktop\\PeerCtrl_ReBuzz\\PeerCtrl\\PeerCtrl.csproj",
+        "projectUniqueName": "C:\\Users\\lukep\\Desktop\\projex_2026\\ReBuzz_pedal_machines\\PeerCtrl_ReBuzz\\PeerCtrl\\PeerCtrl.csproj",
         "projectName": "BTDSys PeerCtrl.NET",
-        "projectPath": "C:\\Users\\lukep\\Desktop\\PeerCtrl_ReBuzz\\PeerCtrl\\PeerCtrl.csproj",
+        "projectPath": "C:\\Users\\lukep\\Desktop\\projex_2026\\ReBuzz_pedal_machines\\PeerCtrl_ReBuzz\\PeerCtrl\\PeerCtrl.csproj",
         "packagesPath": "C:\\Users\\lukep\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\lukep\\Desktop\\PeerCtrl_ReBuzz\\PeerCtrl\\obj\\",
+        "outputPath": "C:\\Users\\lukep\\Desktop\\projex_2026\\ReBuzz_pedal_machines\\PeerCtrl_ReBuzz\\PeerCtrl\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

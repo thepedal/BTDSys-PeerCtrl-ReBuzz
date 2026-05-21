@@ -18,54 +18,139 @@ namespace BTDSys.PeerCtrl
 {
     // =========================================================================
     // DarkCombo – fully custom dark dropdown, no WPF ComboBox involved.
+    // Supports per-item colour highlighting and keyboard navigation.
+    //
+    // Key design: the Popup is NEVER given keyboard focus. DarkCombo itself
+    // retains focus so OnPreviewKeyDown receives every keystroke and routes
+    // it to the list manually. This avoids the cross-HwndSource focus problem
+    // (WPF Popup is a separate Win32 window and swallows keys when focused).
     // =========================================================================
     public class DarkCombo : ContentControl
     {
         static SolidColorBrush Mkb(string h) { h=h.TrimStart('#'); if(h.Length==3)h=$"{h[0]}{h[0]}{h[1]}{h[1]}{h[2]}{h[2]}"; var b=new SolidColorBrush(Color.FromRgb(Convert.ToByte(h.Substring(0,2),16),Convert.ToByte(h.Substring(2,2),16),Convert.ToByte(h.Substring(4,2),16))); b.Freeze(); return b; }
 
-        static readonly SolidColorBrush BG     = Mkb("#2D2D2D");
-        static readonly SolidColorBrush FG     = Mkb("#DDDDDD");
-        static readonly SolidColorBrush BORDER = Mkb("#555555");
+        static readonly SolidColorBrush BG           = Mkb("#2D2D2D");
+        static readonly SolidColorBrush FG           = Mkb("#DDDDDD");
+        static readonly SolidColorBrush FG_HIGHLIGHT = Mkb("#33FF77");
+        static readonly SolidColorBrush BORDER       = Mkb("#555555");
 
         public event Action<int> SelectionChanged;
         public int    SelectedIndex { get; private set; } = -1;
-        public string SelectedItem  => SelectedIndex >= 0 && SelectedIndex < _items.Count ? _items[SelectedIndex] : null;
+        public string SelectedItem  => SelectedIndex >= 0 && SelectedIndex < _items.Count ? _items[SelectedIndex].text : null;
         public int    Count         => _items.Count;
 
-        readonly List<string> _items = new List<string>();
-        readonly TextBlock     _label;
-        readonly Popup         _popup;
-        readonly ListBox       _list;
+        readonly List<(string text, bool highlighted)> _items = new List<(string, bool)>();
+        readonly TextBlock _label;
+        readonly Popup     _popup;
+        readonly ListBox   _list;
+        bool _navigating;
 
         public DarkCombo()
         {
-            Margin = new Thickness(0, 2, 0, 2);
-            Cursor = Cursors.Hand;
+            Focusable = true;
+            IsTabStop = true;
+            Margin    = new Thickness(0, 2, 0, 2);
+            Cursor    = Cursors.Hand;
 
             _label = new TextBlock { Foreground=FG, VerticalAlignment=VerticalAlignment.Center, Margin=new Thickness(4,0,24,0), TextTrimming=TextTrimming.CharacterEllipsis };
-            var arrow = new TextBlock { Text="▾", Foreground=FG, VerticalAlignment=VerticalAlignment.Center, HorizontalAlignment=HorizontalAlignment.Right, Margin=new Thickness(0,0,6,0) };
+            var arrow = new TextBlock { Text="\u25be", Foreground=FG, VerticalAlignment=VerticalAlignment.Center, HorizontalAlignment=HorizontalAlignment.Right, Margin=new Thickness(0,0,6,0) };
             var inner = new Grid(); inner.Children.Add(_label); inner.Children.Add(arrow);
+            var box   = new Border { Background=BG, BorderBrush=BORDER, BorderThickness=new Thickness(1), Child=inner, Height=24 };
 
-            var box = new Border { Background=BG, BorderBrush=BORDER, BorderThickness=new Thickness(1), Child=inner, Height=24 };
+            // Highlight border on hover and focus
+            box.MouseEnter += (s,e) => { if (!_popup.IsOpen) box.BorderBrush = Mkb("#888888"); };
+            box.MouseLeave += (s,e) => { if (!_popup.IsOpen) box.BorderBrush = IsFocused ? Mkb("#44AADD") : BORDER; };
+            GotFocus  += (s,e) => box.BorderBrush = Mkb("#44AADD");
+            LostFocus += (s,e) => box.BorderBrush = BORDER;
 
             _list = new ListBox { Background=BG, BorderBrush=BORDER, BorderThickness=new Thickness(1), Foreground=FG };
             _list.ItemContainerStyle = MakeItemStyle();
-            _list.SelectionChanged += (s,e) => { if (_popup.IsOpen && _list.SelectedIndex >= 0) Commit(_list.SelectedIndex); };
+
+            // Mouse click on list item commits – but not during keyboard navigation
+            _list.SelectionChanged += (s,e) =>
+            {
+                if (_popup.IsOpen && !_navigating && _list.SelectedIndex >= 0)
+                    Commit(_list.SelectedIndex);
+            };
+
+            // Prevent popup from stealing focus on mouse click
+            _list.PreviewMouseDown += (s,e) => { this.Focus(); };
 
             _popup = new Popup { Child=_list, Placement=PlacementMode.Bottom, StaysOpen=false };
 
-            // Attach popup to this element once it's in the tree
+            // Popup border feedback – these must come AFTER _popup is assigned
+            _popup.Opened += (s,e) => box.BorderBrush = Mkb("#44AADD");
+            _popup.Closed  += (s,e) => box.BorderBrush = IsFocused ? Mkb("#44AADD") : BORDER;
+
+            _popup.Opened += (s,e) =>
+            {
+                _navigating = true;
+                _list.SelectedIndex = SelectedIndex;
+                _navigating = false;
+                if (SelectedIndex >= 0 && SelectedIndex < _list.Items.Count)
+                    _list.ScrollIntoView(_list.Items[SelectedIndex]);
+                // Do NOT focus the list – DarkCombo keeps focus so our
+                // OnPreviewKeyDown handles all keyboard events reliably.
+            };
+
             Loaded += (s,e) => { _popup.PlacementTarget = box; };
 
             box.MouseLeftButtonDown += (s,e) =>
             {
-                _popup.Width = Math.Max(ActualWidth, 150);
-                _list.SelectedIndex = SelectedIndex;
-                _popup.IsOpen = true;
+                this.Focus();   // keep focus on DarkCombo, not on popup
+                OpenPopup();
                 e.Handled = true;
             };
 
             Content = box;
+        }
+
+        void OpenPopup()
+        {
+            _popup.Width  = Math.Max(ActualWidth, 150);
+            _popup.IsOpen = true;
+        }
+
+        // All key routing happens here because DarkCombo holds focus
+        protected override void OnPreviewKeyDown(KeyEventArgs e)
+        {
+            if (_popup.IsOpen)
+            {
+                int idx = _list.SelectedIndex < 0 ? 0 : _list.SelectedIndex;
+                int max = _list.Items.Count - 1;
+                switch (e.Key)
+                {
+                    case Key.Down:      Navigate(Math.Min(idx + 1, max)); e.Handled=true; return;
+                    case Key.Up:        Navigate(Math.Max(idx - 1, 0));   e.Handled=true; return;
+                    case Key.PageDown:  Navigate(Math.Min(idx + 8, max)); e.Handled=true; return;
+                    case Key.PageUp:    Navigate(Math.Max(idx - 8, 0));   e.Handled=true; return;
+                    case Key.Home:      Navigate(0);   e.Handled=true; return;
+                    case Key.End:       Navigate(max); e.Handled=true; return;
+                    case Key.Return:
+                    case Key.Space:
+                        if (_list.SelectedIndex >= 0) Commit(_list.SelectedIndex);
+                        e.Handled=true; return;
+                    case Key.Escape:
+                        _popup.IsOpen=false; e.Handled=true; return;
+                }
+            }
+            else
+            {
+                if (e.Key==Key.Down || e.Key==Key.Up || e.Key==Key.F4)
+                {
+                    OpenPopup(); e.Handled=true; return;
+                }
+            }
+            base.OnPreviewKeyDown(e);
+        }
+
+        void Navigate(int newIdx)
+        {
+            _navigating = true;
+            _list.SelectedIndex = newIdx;
+            _navigating = false;
+            if (newIdx >= 0 && newIdx < _list.Items.Count)
+                _list.ScrollIntoView(_list.Items[newIdx]);
         }
 
         void Commit(int idx)
@@ -73,30 +158,48 @@ namespace BTDSys.PeerCtrl
             _popup.IsOpen = false;
             if (idx == SelectedIndex) return;
             SelectedIndex = idx;
-            _label.Text   = SelectedItem ?? "";
+            UpdateLabel();
             SelectionChanged?.Invoke(idx);
+        }
+
+        void UpdateLabel()
+        {
+            if (SelectedIndex >= 0 && SelectedIndex < _items.Count)
+            {
+                _label.Text       = _items[SelectedIndex].text;
+                _label.Foreground = _items[SelectedIndex].highlighted ? FG_HIGHLIGHT : FG;
+            }
+            else { _label.Text=""; _label.Foreground=FG; }
         }
 
         public void SetSelectedIndex(int idx)
         {
             SelectedIndex = idx >= 0 && idx < _items.Count ? idx : -1;
-            _label.Text   = SelectedItem ?? "";
+            UpdateLabel();
         }
 
-        public void ClearItems()  { _items.Clear(); _list.Items.Clear(); SelectedIndex=-1; _label.Text=""; }
-        public void AddItem(string s) { _items.Add(s); _list.Items.Add(s); }
-        public int  IndexOf(string s) => _items.IndexOf(s);
+        public void ClearItems()
+        {
+            _items.Clear(); _list.Items.Clear();
+            SelectedIndex=-1; _label.Text=""; _label.Foreground=FG;
+        }
+
+        public void AddItem(string s, bool highlighted=false)
+        {
+            _items.Add((s, highlighted));
+            _list.Items.Add(new ListBoxItem { Content=s, Foreground=highlighted?FG_HIGHLIGHT:FG });
+        }
+
+        public int IndexOf(string s) => _items.FindIndex(x => x.text == s);
 
         static Style MakeItemStyle()
         {
             var s=new Style(typeof(ListBoxItem));
             s.Setters.Add(new Setter(ListBoxItem.BackgroundProperty,      Mkb("#2D2D2D")));
-            s.Setters.Add(new Setter(ListBoxItem.ForegroundProperty,      Mkb("#DDDDDD")));
             s.Setters.Add(new Setter(ListBoxItem.BorderThicknessProperty, new Thickness(0)));
             s.Setters.Add(new Setter(ListBoxItem.PaddingProperty,         new Thickness(4,2,4,2)));
             var t1=new Trigger{Property=ListBoxItem.IsMouseOverProperty,Value=true};
             t1.Setters.Add(new Setter(ListBoxItem.BackgroundProperty,Mkb("#3A3A3A")));
-            t1.Setters.Add(new Setter(ListBoxItem.ForegroundProperty,Mkb("#FFFFFF")));
             s.Triggers.Add(t1);
             var t2=new Trigger{Property=ListBoxItem.IsSelectedProperty,Value=true};
             t2.Setters.Add(new Setter(ListBoxItem.BackgroundProperty,Mkb("#44AADD")));
@@ -177,9 +280,9 @@ namespace BTDSys.PeerCtrl
             _assignmentList.SelectionChanged += (s,e) => { if (!_suppress) { _selAssignment=_assignmentList.SelectedIndex; LoadEditor(Current()); } };
 
             var btns = new StackPanel { Orientation=Orientation.Horizontal };
-            btns.Children.Add(Btn("Add",    (s,e) => { _machine.GetTrack(_selTrack).Assignments.Add(new TrackAssignment()); _selAssignment=_machine.GetTrack(_selTrack).Assignments.Count-1; RefreshList(); }));
-            btns.Children.Add(Btn("Delete", (s,e) => { var ts=_machine.GetTrack(_selTrack); if (_selAssignment<0||_selAssignment>=ts.Assignments.Count) return; ts.Assignments.RemoveAt(_selAssignment); _selAssignment=Math.Min(_selAssignment,ts.Assignments.Count-1); RefreshList(); }));
-            btns.Children.Add(Btn("Clear",  (s,e) => { _machine.GetTrack(_selTrack).Assignments.Clear(); _selAssignment=-1; RefreshList(); }));
+            btns.Children.Add(Btn("Add",    (s,e) => { _machine.GetTrack(_selTrack).Assignments.Add(new TrackAssignment()); _selAssignment=_machine.GetTrack(_selTrack).Assignments.Count-1; RefreshTrackCombo(); RefreshList(); }));
+            btns.Children.Add(Btn("Delete", (s,e) => { var ts=_machine.GetTrack(_selTrack); if (_selAssignment<0||_selAssignment>=ts.Assignments.Count) return; ts.Assignments.RemoveAt(_selAssignment); _selAssignment=Math.Min(_selAssignment,ts.Assignments.Count-1); RefreshTrackCombo(); RefreshList(); }));
+            btns.Children.Add(Btn("Clear",  (s,e) => { _machine.GetTrack(_selTrack).Assignments.Clear(); _selAssignment=-1; RefreshTrackCombo(); RefreshList(); }));
 
             var g = new Grid();
             g.RowDefinitions.Add(new RowDefinition{Height=GridLength.Auto});
@@ -260,14 +363,20 @@ namespace BTDSys.PeerCtrl
         void Populate()
         {
             _suppress = true;
-            _trackCombo.ClearItems();
-            int n = Math.Max(1, _machine.ActiveTrackCount);
-            for (int t=0;t<n;t++) _trackCombo.AddItem($"Track {t+1}");
+            RefreshTrackCombo();
             _trackCombo.SetSelectedIndex(0);
 
+            // Machines sorted A-Z (change 5)
             _machineCombo.ClearItems(); _machineCombo.AddItem("(none)");
             var buzz = _machine.BuzzHost;
-            if (buzz?.Song?.Machines != null) { var self=_machine.Host?.Machine; foreach(var m in buzz.Song.Machines) if(m!=self) _machineCombo.AddItem(m.Name); }
+            if (buzz?.Song?.Machines != null)
+            {
+                var self = _machine.Host?.Machine;
+                foreach (var m in buzz.Song.Machines
+                             .Where(m => m != self)
+                             .OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase))
+                    _machineCombo.AddItem(m.Name);
+            }
 
             _midiCtrlCombo.ClearItems(); _midiCtrlCombo.AddItem("Off");
             for (int i=0;i<=127;i++) _midiCtrlCombo.AddItem(i.ToString());
@@ -280,6 +389,23 @@ namespace BTDSys.PeerCtrl
             _stopOnMuteCheck.IsChecked=_machine.StopOnMute==1;
             _suppress=false;
             RefreshList();
+        }
+
+        /// <summary>
+        /// Rebuild the track dropdown, colouring tracks that have assignments
+        /// bright green so free slots are immediately visible (change 3).
+        /// </summary>
+        void RefreshTrackCombo()
+        {
+            int prevSel = _trackCombo.SelectedIndex;
+            _trackCombo.ClearItems();
+            int n = Math.Max(1, _machine.ActiveTrackCount);
+            for (int t = 0; t < n; t++)
+            {
+                bool hasAssignments = _machine.GetTrack(t).Assignments.Count > 0;
+                _trackCombo.AddItem($"Track {t+1}", highlighted: hasAssignments);
+            }
+            _trackCombo.SetSelectedIndex(prevSel >= 0 && prevSel < n ? prevSel : 0);
         }
 
         void RefreshList()

@@ -20,6 +20,7 @@ Classic use-cases include:
 | Smooth (glide) any parameter | Set the **Inertia** global parameter |
 | Non-linear mapping | Draw a curve in the **Mapping** editor |
 | MIDI CC → Buzz parameter | Assign a CC number per track |
+| Hardware controller feedback | Enable **Feedback** – controller lights snap to saved positions on reload |
 | Endless rotary encoders (inc/dec) | Enable **Inc/Dec** mode on the MIDI panel |
 | Tie tracks together | Enable **Slaved** on a track |
 
@@ -34,11 +35,12 @@ Classic use-cases include:
 | Per-track Slaved parameter | ✅ identical behaviour |
 | Per-track Value parameter (0–65534) | ✅ identical behaviour |
 | Multiple assignments per track | ✅ full support |
-| Piecewise-linear mapping curve | ✅ interactive WPF editor |
+| Piecewise-linear mapping curve | ✅ interactive WPF editor with Mirror/Invert/Reset |
 | MIDI CC input (absolute) | ✅ |
+| MIDI CC learn (click Learn, move control) | ✅ |
 | MIDI CC inc/dec (CC 96/97) | ✅ |
 | MIDI inc/dec wrap mode | ✅ |
-| MIDI feedback output | Stub – ReBuzz MIDI-out API hookup left as TODO |
+| MIDI feedback output | ✅ sends to all MIDI output devices |
 | Ctrl Rate attribute (sub-tick updates) | Mapped to **Send Freq** attribute |
 | Stop on Mute attribute | ✅ |
 | Plugin interface (XY pad, Mixer GUI…) | Not ported – ReBuzz has native alternatives |
@@ -60,7 +62,7 @@ Classic use-cases include:
 | Slaved | 0/1 | 0 | When 1, this track mirrors the previous track's Value |
 | Value | 0–65534 | 32767 | The 0–100% value sent through the mapping to the target parameter |
 
-### Attributes
+### Attributes (in Assignment Settings dialog)
 | Name | Range | Default | Description |
 |------|-------|---------|-------------|
 | MIDI Inc/Dec Amount | 0–65534 | 1024 | Step size for endless-encoder CC 96/97 messages |
@@ -73,159 +75,89 @@ Classic use-cases include:
 
 Open with **right-click → Assignment Settings…**
 
-```
-┌─ Track selector ─────────────────────────────────────────────────────┐
-│  Track: [Track 1 ▾]                                                  │
-├─ Assignment list ────────────────────────────────────────────────────┤
-│  SynthX / Cutoff [tr 0]                                              │
-│  SynthX / Resonance                                                  │
-│  [Add]  [Delete]  [Clear]                                            │
-├─ Target ─────────────────────────────────────────────────────────────┤
-│  Machine:   [SynthX ▾]                                               │
-│  Parameter: [Cutoff ▾]                                               │
-│  Track:     [Track 1 ▾]  (or "All tracks")                           │
-├─ MIDI CC ────────────────────────────────────────────────────────────┤
-│  Controller: [74 ▾]   Channel: [1 ▾]                                 │
-│  Last CC: —                                                          │
-│  [x] Feedback   [x] Inc/Dec   [ ] Wrap                              │
-├─ Mapping (non-linear curve) ─────────────────────────────────────────┤
-│  ┌───────────────────────────────────────────────┐                  │
-│  │  ╲                                            │ ← drag points    │
-│  │   ╲                                           │   right-click    │
-│  │    ╲                                          │   to remove      │
-│  │     ╲                                         │   click empty    │
-│  └───────────────────────────────────────────────┘   to add        │
-│                                         [Reset to Linear]            │
-├─ Parameter Info ─────────────────────────────────────────────────────┤
-│  Name:  Cutoff                                                       │
-│  Range: 0 – 127   Type: Byte   Group: Track                         │
-└──────────────────────────────────────────────────────────────────────┘
-                                          [Update Assignment]  [OK] [Cancel]
-```
+The dialog shows one instance at a time; opening it again while it is
+already visible brings it to the front.
 
-### Workflow
+### Track selector
 
-1. Select the **Track** whose `Value` parameter you want to use as a source.
-2. Click **Add** to create a new (empty) assignment.
-3. Choose the **Machine** and **Parameter** to control.
-4. Choose **Track** on the target machine (or "All tracks").
-5. (Optional) Configure a **MIDI CC** to drive this track from hardware.
-6. (Optional) Draw a custom **Mapping** curve for non-linear response.
-7. Click **Update Assignment**, then **OK**.
+Tracks that already have assignments are shown in **bright green**.
+Empty tracks are shown in the default colour. This lets you see at a
+glance which slots are free before adding a new assignment.
 
-Repeat steps 2–7 to add more assignments to the same track (fan-out).
+Machines in the Machine dropdown are listed **alphabetically**.
 
----
+### MIDI Learn
 
-## Mapping curve editor
+1. Select an assignment in the list.
+2. Click **Learn** (turns red).
+3. Move a knob or fader on your hardware controller.
+4. The Controller and Channel fields update automatically.
 
-The mapping curve transforms the 0–100% track Value into the actual parameter
-value sent to the target.  The curve is stored as a sorted list of control
-points and evaluated as a piecewise-linear function.
+### Keyboard navigation in dropdowns
+
+After selecting an item with the mouse, you can immediately use:
+- **Arrow keys** – move one item at a time
+- **Page Up / Page Down** – jump a page at a time
+- **Enter** – confirm selection
+- **Escape** – close the dropdown
+
+### Mapping curve editor
 
 - **Left-click** on empty canvas → adds a control point
 - **Drag** an existing point → moves it
 - **Right-click** on a point → removes it (endpoints are locked)
-- **Reset to Linear** → restores the default straight-line mapping
+- **Right-click** on empty canvas → context menu with:
+  - **Mirror** – flip the curve horizontally
+  - **Invert** – flip the curve vertically
+  - **Reset to linear** – restore the default straight line
 
-The default straight-line maps `Value=0 → 100%` of the parameter range and
-`Value=65534 → 0%`, identical to the original PeerCtrl default.
+The default mapping is linear: `Value=0 → 0%` of parameter range,
+`Value=65534 → 100%`.
+
+### MIDI Feedback
+
+Enable **Feedback** on an assignment to send MIDI CC messages back to
+the hardware whenever the parameter value changes. On song reload,
+saved positions are transmitted to all MIDI output devices so controller
+lights snap to the correct positions automatically.
+
+Feedback is sent to **all** MIDI output devices simultaneously.
+This avoids the need for a device selector and ensures hardware
+connected on any port receives the update.
+
+> **BCR2000 note:** use the BCR2000 in **absolute CC mode** (0–127).
+> The **Inc/Dec** option is for Doepfer Pocket Dial-style endless
+> encoders only (CC 96/97 protocol).
 
 ---
 
 ## Inertia
 
 When **Inertia** is non-zero, every value change is interpolated over
-`Inertia / 10` ticks.  The interpolation step is recalculated per `Work()`
-call using the host's `SamplesPerTick`.
+`Inertia / 10` ticks. The interpolation step is recalculated per
+`Work()` call using the host's `SamplesPerTick`.
 
-Setting **Inertia = 0** in a pattern immediately snaps all tracks to their
-target values.
-
----
-
-## MIDI inc/dec (endless encoder) mode
-
-Enable **Inc/Dec** on a track's MIDI assignment.  The machine then listens for
-CC 96 (increment) and CC 97 (decrement) messages on the configured channel.
-The **controller** field selects which *value byte* is considered "this
-encoder's" message (Doepfer Pocket Dial style).
-
-The step size is controlled by the **MIDI Inc/Dec Amount** attribute.
-
-With **Wrap** enabled, incrementing past 100% wraps to 0% and vice-versa.
+Setting **Inertia = 0** in a pattern immediately snaps all tracks to
+their target values.
 
 ---
 
 ## Building
 
 ### Prerequisites
-- Visual Studio 2022 or `dotnet` CLI ≥ 9.0
-- ReBuzz installed (for the `BuzzGUI.*` NuGet packages)
+- `dotnet` CLI ≥ 10.0
+- ReBuzz installed at `C:\Program Files\ReBuzz`
+  (adjust `ReBuzzDir` in `Directory.Build.props` if different)
 
 ### Steps
 
-```bash
-# 1. Restore NuGet packages
-dotnet restore
-
-# 2. Build release
+```powershell
+cd PeerCtrl
 dotnet build -c Release
-
-# The DLL is copied to %APPDATA%\ReBuzz\Gear\Generators\ automatically.
-# Adjust <OutputPath> in PeerCtrl.csproj if your install is elsewhere.
 ```
 
-If you are building inside the **ReBuzz solution**:
-
-1. Add the `PeerCtrl` project to `ReBuzz.sln`.
-2. Replace the `PackageReference` entries with:
-   ```xml
-   <ProjectReference Include="..\BuzzGUI.Interfaces\BuzzGUI.Interfaces.csproj"/>
-   <ProjectReference Include="..\BuzzGUI.Common\BuzzGUI.Common.csproj"/>
-   ```
-
-### Output path
-
-The default `OutputPath` in the `.csproj` is:
-
-```
-%APPDATA%\ReBuzz\Gear\Generators\
-```
-
-Change this to your actual ReBuzz gear folder if different.
-
----
-
-## Extending
-
-### Adding more assignments per track
-
-Already supported.  Click **Add** multiple times on the same track.
-
-### Custom non-linear curves
-
-The `EnvData` class stores any number of `EnvPoint` objects.  You can
-programmatically add curves from code:
-
-```csharp
-var a = new TrackAssignment { MachineName = "MySynth", ParamIndex = 2 };
-a.Mapping.Points = new List<EnvPoint>
-{
-    new EnvPoint { X = 0,     Y = 65535 },
-    new EnvPoint { X = 16384, Y = 60000 },  // gentle S-curve
-    new EnvPoint { X = 49152, Y = 5000  },
-    new EnvPoint { X = 65535, Y = 0     },
-};
-machine.GetTrack(0).Assignments.Add(a);
-machine.ResolveAssignment(a);
-```
-
-### MIDI feedback
-
-The stub is in `TrackAssignment.ApplyValue()`.  Hook into
-`host.Machine.Graph.Buzz.MidiOut(device, midiMessage)` when ReBuzz exposes
-that API, matching the original's `pCB->MidiOut(device, data)` call.
+Run as Administrator so the post-build step can copy the DLL to
+`C:\Program Files\ReBuzz\Gear\Generators\`.
 
 ---
 
@@ -234,9 +166,10 @@ that API, matching the original's `pCB->MidiOut(device, data)` call.
 | File | Purpose |
 |------|---------|
 | `PeerCtrl.cs` | Machine class, track state, data structures, inertia, MIDI |
-| `SettingsWindow.xaml` | WPF layout for the Assignment Settings dialog |
-| `SettingsWindow.xaml.cs` | Dialog code-behind + interactive `CurveCanvas` control |
-| `PeerCtrl.csproj` | .NET 9 / WPF project targeting x64 |
+| `SettingsWindow.xaml` | Placeholder XAML (excluded from compilation) |
+| `SettingsWindow.xaml.cs` | Full code-only settings dialog + `CurveCanvas` + `DarkCombo` |
+| `PeerCtrl.csproj` | .NET 10 / WPF project |
+| `Directory.Build.props` | Sets `ReBuzzDir` for the project |
 
 ---
 
